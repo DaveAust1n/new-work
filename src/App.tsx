@@ -1,11 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { ContactShadows, Environment, Grid, OrbitControls, Text } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
-  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis,
+  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, Pause, Play, RotateCcw,
   Forklift, LayoutDashboard, MapPin, Maximize2, Package, PackageCheck, Plus, Search,
   Settings2, ShieldCheck, Truck, Warehouse, Zap
 } from 'lucide-react'
@@ -58,35 +58,52 @@ function Rack({ rack, selected, onSelect }: { rack: RackData; selected: boolean;
   </group>
 }
 
-function ForkliftModel() {
+function ForkliftModel({ offset, speed, running, color = '#efb84e' }: { offset: number; speed: number; running: boolean; color?: string }) {
   const ref = useRef<THREE.Group>(null)
-  useFrame(({ clock }) => {
-    if (!ref.current) return
-    const t = clock.getElapsedTime()
-    ref.current.position.x = Math.sin(t * 0.22) * 2.2
-    ref.current.position.z = Math.cos(t * 0.22) * 1.2 + 0.2
-    ref.current.rotation.y = Math.atan2(Math.cos(t * 0.22) * 1.2, Math.cos(t * 0.22) * 2.2)
+  const elapsed = useRef(0)
+  const route = useMemo(() => [[-4.1, -3.3], [-4.1, 3.1], [-2.9, 3.1], [-0.8, 3.1], [0.4, 3.1], [0.4, -3.2], [2.9, -3.2], [3.7, -1.4], [3.7, 2.7], [2.6, 3.4], [-1.2, 3.4], [-4.1, 1.4]], [])
+  useFrame((_, delta) => {
+    if (!ref.current || !running) return
+    elapsed.current += delta * speed
+    const phase = (elapsed.current * 0.62 + offset) % route.length
+    const index = Math.floor(phase)
+    const blend = phase - index
+    const a = route[index]
+    const b = route[(index + 1) % route.length]
+    ref.current.position.set(a[0] + (b[0] - a[0]) * blend, 0, a[1] + (b[1] - a[1]) * blend)
+    ref.current.rotation.y = Math.atan2(b[0] - a[0], b[1] - a[1])
   })
-  return <group ref={ref} position={[0, 0, 0]}>
-    <mesh castShadow position={[0, 0.32, 0]}><boxGeometry args={[0.74, 0.42, 0.44]} /><meshStandardMaterial color="#efb84e" metalness={0.12} roughness={0.5} /></mesh>
-    <mesh castShadow position={[-0.02, 0.67, -0.05]}><boxGeometry args={[0.35, 0.38, 0.36]} /><meshStandardMaterial color="#f8ca6b" /></mesh>
+  return <group ref={ref} position={[-4.1, 0, -3.3]}>
+    <mesh castShadow position={[0, 0.32, 0]}><boxGeometry args={[0.74, 0.42, 0.44]} /><meshStandardMaterial color={color} metalness={0.12} roughness={0.5} /></mesh>
+    <mesh castShadow position={[-0.02, 0.67, -0.05]}><boxGeometry args={[0.35, 0.38, 0.36]} /><meshStandardMaterial color={color === '#efb84e' ? '#f8ca6b' : color} /></mesh>
     <mesh position={[0, 0.69, -0.05]}><boxGeometry args={[0.24, 0.23, 0.03]} /><meshStandardMaterial color="#1b303a" metalness={0.4} roughness={0.2} /></mesh>
     {[-0.25, 0.25].map((x) => [-0.18, 0.18].map((z) => <mesh key={x + ':' + z} castShadow rotation={[Math.PI / 2, 0, 0]} position={[x, 0.16, z]}><cylinderGeometry args={[0.105, 0.105, 0.09, 12]} /><meshStandardMaterial color="#17242c" roughness={0.85} /></mesh>))}
     <mesh position={[0.45, 0.38, 0]}><boxGeometry args={[0.05, 0.68, 0.08]} /><meshStandardMaterial color="#a7bac4" metalness={0.7} /></mesh>
     <mesh position={[0.58, 0.12, 0]}><boxGeometry args={[0.38, 0.055, 0.08]} /><meshStandardMaterial color="#a7bac4" metalness={0.7} /></mesh>
     <mesh position={[0.57, 0.2, 0.14]}><boxGeometry args={[0.38, 0.05, 0.06]} /><meshStandardMaterial color="#a7bac4" metalness={0.7} /></mesh>
+    <mesh castShadow position={[0.68, 0.29, 0]}><boxGeometry args={[0.32, 0.2, 0.3]} /><meshStandardMaterial color="#d59a60" /></mesh>
   </group>
 }
 
-function DeliveryTruck({ x, z, color }: { x: number; z: number; color: string }) {
-  return <group position={[x, 0, z]}>
+function DeliveryTruck({ x, z, color, offset, speed, running }: { x: number; z: number; color: string; offset: number; speed: number; running: boolean }) {
+  const ref = useRef<THREE.Group>(null)
+  const elapsed = useRef(0)
+  useFrame((_, delta) => {
+    if (!ref.current || !running) return
+    elapsed.current += delta * speed
+    const phase = (elapsed.current * 0.55 + offset) % 10
+    ref.current.position.x = x + (phase < 5 ? phase * 0.34 : (10 - phase) * 0.34)
+    ref.current.position.z = z + (phase < 5 ? 0.5 : -0.5)
+    ref.current.rotation.y = phase < 5 ? Math.PI / 2 : -Math.PI / 2
+  })
+  return <group ref={ref} position={[x, 0, z]}>
     <mesh castShadow position={[0, 0.35, 0]}><boxGeometry args={[1.45, 0.55, 0.58]} /><meshStandardMaterial color={color} roughness={0.55} /></mesh>
     <mesh castShadow position={[0.55, 0.55, 0]}><boxGeometry args={[0.42, 0.45, 0.56]} /><meshStandardMaterial color="#a8d2dc" metalness={0.12} roughness={0.3} /></mesh>
     {[-0.43, 0.45].map((wx) => [-0.27, 0.27].map((wz) => <mesh key={wx + ':' + wz} rotation={[Math.PI / 2, 0, 0]} position={[wx, 0.16, wz]}><cylinderGeometry args={[0.12, 0.12, 0.09, 12]} /><meshStandardMaterial color="#17242c" /></mesh>))}
   </group>
 }
 
-function WarehouseScene({ racks, selectedRack, setSelectedRack }: { racks: RackData[]; selectedRack: string; setSelectedRack: (id: string) => void }) {
+function WarehouseScene({ racks, selectedRack, setSelectedRack, running, speed }: { racks: RackData[]; selectedRack: string; setSelectedRack: (id: string) => void; running: boolean; speed: number }) {
   const floorClick = (e: ThreeEvent<MouseEvent>) => { if (e.object.name === 'warehouse-floor') setSelectedRack('') }
   return <Canvas shadows camera={{ position: [10, 10, 12], fov: 36 }} dpr={[1, 1.6]} onPointerMissed={() => setSelectedRack('')}>
     <color attach="background" args={['#111b25']} />
@@ -99,9 +116,11 @@ function WarehouseScene({ racks, selectedRack, setSelectedRack }: { racks: RackD
       <Grid position={[0, -0.055, 0]} args={[18, 13]} cellSize={0.8} cellThickness={0.5} cellColor="#334654" sectionSize={3.2} sectionThickness={0.8} sectionColor="#476171" fadeDistance={22} infiniteGrid={false} />
       {[-4.7, -1.3, 2.1].map((x, i) => <mesh key={x} position={[x, 0.005, 0]}><boxGeometry args={[0.08, 0.02, 7.7]} /><meshStandardMaterial color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} emissive={['#155a4e', '#624b18', '#303c7a'][i]} emissiveIntensity={0.3} /></mesh>)}
       {racks.map((rack) => <Rack key={rack.id} rack={rack} selected={selectedRack === rack.id} onSelect={() => setSelectedRack(rack.id)} />)}
-      <DeliveryTruck x={5.1} z={-3.3} color="#4679d8" />
-      <DeliveryTruck x={5.1} z={-1.3} color="#54bda8" />
-      <ForkliftModel />
+      <DeliveryTruck x={5.1} z={-3.3} color="#4679d8" offset={0} speed={speed} running={running} />
+      <DeliveryTruck x={5.1} z={-1.3} color="#54bda8" offset={5} speed={speed} running={running} />
+      <ForkliftModel offset={0} speed={speed} running={running} />
+      <ForkliftModel offset={4.2} speed={speed * 0.82} running={running} color="#58b8d5" />
+      <ForkliftModel offset={8.3} speed={speed * 0.68} running={running} color="#b18af4" />
       {[-4.7, -1.3, 2.1].map((x, i) => <Text key={x} position={[x, 0.12, 4.2]} fontSize={0.24} color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} anchorX="center">ZONE {['A', 'B', 'C'][i]}</Text>)}
       <mesh position={[5.15, 0.025, 0.2]}><boxGeometry args={[2.4, 0.035, 7.8]} /><meshStandardMaterial color="#243643" /></mesh>
       {[-2.7, -0.7, 1.3].map((z) => <mesh key={z} position={[5.15, 0.05, z]}><boxGeometry args={[2.3, 0.06, 1.4]} /><meshStandardMaterial color="#314958" /></mesh>)}
