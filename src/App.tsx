@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
-import { ContactShadows, Environment, Grid, OrbitControls, RoundedBox, Text } from '@react-three/drei'
+import { ContactShadows, Environment, Grid, OrbitControls, Text } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
-  Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Download, Ellipsis,
+  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis,
   Forklift, LayoutDashboard, MapPin, Maximize2, Package, PackageCheck, Plus, Search,
   Settings2, ShieldCheck, Truck, Warehouse, Zap
 } from 'lucide-react'
@@ -59,7 +59,7 @@ function Rack({ rack, selected, onSelect }: { rack: RackData; selected: boolean;
 }
 
 function ForkliftModel() {
-  const ref = React.useRef<THREE.Group>(null)
+  const ref = useRef<THREE.Group>(null)
   useFrame(({ clock }) => {
     if (!ref.current) return
     const t = clock.getElapsedTime()
