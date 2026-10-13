@@ -78,7 +78,7 @@ function ForkliftModel() {
   </group>
 }
 
-function Truck({ x, z, color }: { x: number; z: number; color: string }) {
+function DeliveryTruck({ x, z, color }: { x: number; z: number; color: string }) {
   return <group position={[x, 0, z]}>
     <mesh castShadow position={[0, 0.35, 0]}><boxGeometry args={[1.45, 0.55, 0.58]} /><meshStandardMaterial color={color} roughness={0.55} /></mesh>
     <mesh castShadow position={[0.55, 0.55, 0]}><boxGeometry args={[0.42, 0.45, 0.56]} /><meshStandardMaterial color="#a8d2dc" metalness={0.12} roughness={0.3} /></mesh>
@@ -99,8 +99,8 @@ function WarehouseScene({ racks, selectedRack, setSelectedRack }: { racks: RackD
       <Grid position={[0, -0.055, 0]} args={[18, 13]} cellSize={0.8} cellThickness={0.5} cellColor="#334654" sectionSize={3.2} sectionThickness={0.8} sectionColor="#476171" fadeDistance={22} infiniteGrid={false} />
       {[-4.7, -1.3, 2.1].map((x, i) => <mesh key={x} position={[x, 0.005, 0]}><boxGeometry args={[0.08, 0.02, 7.7]} /><meshStandardMaterial color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} emissive={['#155a4e', '#624b18', '#303c7a'][i]} emissiveIntensity={0.3} /></mesh>)}
       {racks.map((rack) => <Rack key={rack.id} rack={rack} selected={selectedRack === rack.id} onSelect={() => setSelectedRack(rack.id)} />)}
-      <Truck x={5.1} z={-3.3} color="#4679d8" />
-      <Truck x={5.1} z={-1.3} color="#54bda8" />
+      <DeliveryTruck x={5.1} z={-3.3} color="#4679d8" />
+      <DeliveryTruck x={5.1} z={-1.3} color="#54bda8" />
       <ForkliftModel />
       {[-4.7, -1.3, 2.1].map((x, i) => <Text key={x} position={[x, 0.12, 4.2]} fontSize={0.24} color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} anchorX="center">ZONE {['A', 'B', 'C'][i]}</Text>)}
       <mesh position={[5.15, 0.025, 0.2]}><boxGeometry args={[2.4, 0.035, 7.8]} /><meshStandardMaterial color="#243643" /></mesh>
