@@ -86,7 +86,7 @@ export function createMockTelemetryProvider(intervalMs = 2000): TelemetryProvide
   let snapshot = demoDevices.map((device) => ({ ...device }))
 
   const emit = () => {
-    snapshot = snapshot.map((device, index) => {
+    snapshot = snapshot.map((device, index): DeviceTelemetry => {
       const wave = phase + index * 1.7
       if (device.kind === 'forklift' && device.indoor) {
         return {
