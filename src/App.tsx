@@ -5,7 +5,7 @@ import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
-  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, Pause, Play, RotateCcw, Pause, Play, RotateCcw,
+  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, Pause, Play, RotateCcw,
   Forklift, LayoutDashboard, MapPin, Maximize2, Package, PackageCheck, Plus, Search,
   Settings2, ShieldCheck, Truck, Warehouse, Zap
 } from 'lucide-react'
