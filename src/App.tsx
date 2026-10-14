@@ -139,24 +139,40 @@ export default function App() {
     if (!supabase) return
     let active = true
     let channel: RealtimeChannel | null = null
+    let pollId: ReturnType<typeof setInterval> | null = null
+    let ownerId = ''
+    const refreshGps = async () => {
+      if (!ownerId || !active) return
+      const { data, error } = await supabase!.from('device_locations')
+        .select('device_id,latitude,longitude,accuracy_m,speed_mps,heading_deg,recorded_at')
+        .eq('owner_id', ownerId)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+      if (!error && active && data?.[0]) {
+        const latest = data[0] as LiveGpsPosition
+        setLiveGps((current) => current?.recorded_at === latest.recorded_at ? current : latest)
+      }
+    }
     const connectGps = async () => {
       const { data: authData } = await supabase!.auth.getUser()
       const user = authData.user
       if (!user || !active) return
-      const { data } = await supabase!.from('device_locations')
-        .select('device_id,latitude,longitude,accuracy_m,speed_mps,heading_deg,recorded_at')
-        .eq('owner_id', user.id)
-        .order('recorded_at', { ascending: false })
-        .limit(1)
-      if (active && data?.[0]) setLiveGps(data[0] as LiveGpsPosition)
+      ownerId = user.id
+      await refreshGps()
       channel = supabase!.channel('waretrack-scene-gps-' + user.id)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'device_locations', filter: 'owner_id=eq.' + user.id }, (payload) => {
           if (active && payload.new && 'latitude' in payload.new) setLiveGps(payload.new as LiveGpsPosition)
         })
         .subscribe()
+      // Poll as a fallback in case a Realtime event is missed by the browser.
+      pollId = setInterval(() => { void refreshGps() }, 2500)
     }
     void connectGps()
-    return () => { active = false; if (channel) void supabase!.removeChannel(channel) }
+    return () => {
+      active = false
+      if (pollId !== null) clearInterval(pollId)
+      if (channel) void supabase!.removeChannel(channel)
+    }
   }, [])
   const visibleShipments = useMemo(() => shipments.filter((s) => (filter === 'All' || s.status === filter) && (s.id + s.company).toLowerCase().includes(search.toLowerCase())), [filter, search])
   const occupied = Math.round(racks.reduce((sum, rack) => sum + rack.occupied, 0) / racks.reduce((sum, rack) => sum + rack.capacity, 0) * 100)
