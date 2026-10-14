@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { ContactShadows, Environment, Grid, OrbitControls, Text } from '@react-three/drei'
 import { AlertCircle, ArrowRightLeft, CheckCircle2, Layers3, MapPin, Package, Plus, RefreshCw, Warehouse } from 'lucide-react'
@@ -158,7 +159,7 @@ export default function App() {
     finally { setBusy(false) }
   }
 
-  const submitStock = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submitStock = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!supabase || !ownerId || !selected) return
     const qty = Number(quantity)
