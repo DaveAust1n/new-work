@@ -9,8 +9,8 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import './gps-live.css'
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
-  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, Pause, Play, RotateCcw,
-  Forklift, LayoutDashboard, MapPin, Maximize2, Package, PackageCheck, Plus, Search,
+  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, RotateCcw,
+  Forklift, LayoutDashboard, MapPin, Package, PackageCheck, Plus, Search,
   Settings2, ShieldCheck, Truck, Warehouse, Zap
 } from 'lucide-react'
 
