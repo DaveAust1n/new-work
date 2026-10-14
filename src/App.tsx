@@ -1,228 +1,243 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Canvas, useFrame } from '@react-three/fiber'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Canvas } from '@react-three/fiber'
 import { ContactShadows, Environment, Grid, OrbitControls, Text } from '@react-three/drei'
-import type { ThreeEvent } from '@react-three/fiber'
-import * as THREE from 'three'
-import LiveGpsPanel from './LiveGpsPanel'
-import { supabase } from './lib/supabase'
+import { AlertCircle, ArrowRightLeft, CheckCircle2, Layers3, MapPin, Package, Plus, RefreshCw, Warehouse } from 'lucide-react'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import * as THREE from 'three'
+import { supabase } from './lib/supabase'
 import './gps-live.css'
-import {
-  Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
-  ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, RotateCcw,
-  Forklift, LayoutDashboard, MapPin, Package, PackageCheck, Plus, Search,
-  Settings2, ShieldCheck, Truck, Warehouse, Zap
-} from 'lucide-react'
+import './spatial-warehouse.css'
 
-type RackData = { id: string; zone: string; x: number; z: number; occupied: number; capacity: number; status: 'Healthy' | 'Low stock' | 'Attention' }
-type LiveGpsPosition = { device_id: string; latitude: number; longitude: number; accuracy_m: number | null; speed_mps: number | null; heading_deg: number | null; recorded_at: string }
-const initialRacks: RackData[] = [
-  { id: 'A-01', zone: 'A', x: -5.2, z: -2.2, occupied: 82, capacity: 100, status: 'Healthy' },
-  { id: 'A-02', zone: 'A', x: -5.2, z: 0, occupied: 64, capacity: 100, status: 'Healthy' },
-  { id: 'A-03', zone: 'A', x: -5.2, z: 2.2, occupied: 28, capacity: 100, status: 'Low stock' },
-  { id: 'B-01', zone: 'B', x: -1.8, z: -2.2, occupied: 91, capacity: 100, status: 'Attention' },
-  { id: 'B-02', zone: 'B', x: -1.8, z: 0, occupied: 73, capacity: 100, status: 'Healthy' },
-  { id: 'B-03', zone: 'B', x: -1.8, z: 2.2, occupied: 56, capacity: 100, status: 'Healthy' },
-  { id: 'C-01', zone: 'C', x: 1.6, z: -2.2, occupied: 49, capacity: 100, status: 'Healthy' },
-  { id: 'C-02', zone: 'C', x: 1.6, z: 0, occupied: 87, capacity: 100, status: 'Healthy' },
-  { id: 'C-03', zone: 'C', x: 1.6, z: 2.2, occupied: 18, capacity: 100, status: 'Low stock' },
-]
-const shipments = [
-  { id: 'SHP-2084', company: 'Northstar Retail', items: 18, eta: '09:42 AM', status: 'Loading', color: '#f7b84b' },
-  { id: 'SHP-2085', company: 'Atlas Distribution', items: 42, eta: '10:15 AM', status: 'In transit', color: '#55d6be' },
-  { id: 'SHP-2086', company: 'Urban Supply Co.', items: 12, eta: '10:30 AM', status: 'Queued', color: '#9b8cff' },
-]
-const activity = [
-  { title: 'Inbound shipment received', detail: 'SHP-2083 · Dock 02', time: '2 min ago', icon: PackageCheck, tone: 'mint' },
-  { title: 'Stock threshold reached', detail: 'Rack A-03 · Zone A', time: '8 min ago', icon: AlertTriangle, tone: 'amber' },
-  { title: 'Forklift FL-04 assigned', detail: 'Move pallet to Zone C', time: '14 min ago', icon: Forklift, tone: 'blue' },
-]
+type WarehouseBlock = {
+  id: string
+  owner_id: string
+  block_code: string
+  zone: string
+  x: number
+  y: number
+  z: number
+  capacity_units: number
+  occupied_units: number
+  item_label: string | null
+  updated_at: string
+}
+type Movement = {
+  id: string
+  item_label: string
+  quantity: number
+  movement_type: 'receive' | 'move' | 'dispatch'
+  created_at: string
+  from_block_id: string | null
+  to_block_id: string | null
+}
+type BlockProps = { block: WarehouseBlock; selected: boolean; onSelect: () => void }
 
-function Pallet({ x, y, z, color = '#d69b62' }: { x: number; y: number; z: number; color?: string }) {
-  return <group position={[x, y, z]}>
-    <mesh castShadow position={[0, 0.09, 0]}><boxGeometry args={[0.58, 0.18, 0.52]} /><meshStandardMaterial color="#8d6545" roughness={0.8} /></mesh>
-    {[0, 1, 2].map((n) => <mesh key={n} castShadow position={[0, 0.34 + n * 0.19, 0]}><boxGeometry args={[0.48, 0.17, 0.42]} /><meshStandardMaterial color={color} roughness={0.68} /></mesh>)}
-    <mesh position={[0, 0.34, 0.217]}><boxGeometry args={[0.24, 0.12, 0.009]} /><meshStandardMaterial color="#f4d9a7" /></mesh>
+function SpatialBlock({ block, selected, onSelect }: BlockProps) {
+  const fill = block.occupied_units === 0 ? '#334957' : block.occupied_units / block.capacity_units >= 0.85 ? '#e2a35c' : '#55d6be'
+  const height = 0.18 + (block.occupied_units / block.capacity_units) * 1.35
+  const x = (block.x - 1) * 3
+  const z = (block.z - 1) * 3
+  return <group position={[x, 0, z]} onClick={(event) => { event.stopPropagation(); onSelect() }}>
+    <mesh position={[0, 0.08, 0]} receiveShadow>
+      <boxGeometry args={[2.25, 0.16, 2.25]} />
+      <meshStandardMaterial color={selected ? '#286e67' : '#1d303d'} emissive={selected ? '#1b6c60' : '#000000'} emissiveIntensity={selected ? 0.6 : 0.1} />
+    </mesh>
+    {block.occupied_units > 0 && <mesh castShadow position={[0, 0.18 + height / 2, 0]}>
+      <boxGeometry args={[1.55, height, 1.55]} />
+      <meshStandardMaterial color={fill} roughness={0.62} />
+    </mesh>}
+    <mesh position={[0, 0.19, 0]}>
+      <boxGeometry args={[2.1, 0.025, 2.1]} />
+      <meshBasicMaterial color={selected ? '#8df2df' : fill} />
+    </mesh>
+    <Text position={[0, block.occupied_units > 0 ? height + 0.42 : 0.52, 0]} fontSize={0.3} color="#eef7fa" anchorX="center" anchorY="middle">{block.block_code}</Text>
+    <Text position={[0, 0.29, 0.88]} fontSize={0.2} color={fill} anchorX="center" anchorY="middle">{block.occupied_units}/{block.capacity_units}</Text>
   </group>
 }
 
-function Rack({ rack, selected, onSelect }: { rack: RackData; selected: boolean; onSelect: () => void }) {
-  const frame = rack.status === 'Attention' ? '#ed8a59' : '#73889a'
-  const boxColor = rack.status === 'Low stock' ? '#d9ad62' : rack.status === 'Attention' ? '#e27c59' : '#7f9eac'
-  return <group position={[rack.x, 0, rack.z]} onClick={(e) => { e.stopPropagation(); onSelect() }}>
-    <mesh position={[0, 1.02, 0]}><boxGeometry args={[1.18, 0.035, 0.76]} /><meshStandardMaterial color={selected ? '#5ee0c1' : '#304352'} emissive={selected ? '#1a9e84' : '#000000'} emissiveIntensity={selected ? 0.6 : 0} /></mesh>
-    {[-0.55, 0.55].map((x) => [-0.34, 0.34].map((z) => <mesh key={x + ':' + z} castShadow position={[x, 0.95, z]}><boxGeometry args={[0.055, 1.9, 0.055]} /><meshStandardMaterial color={frame} metalness={0.55} roughness={0.38} /></mesh>))}
-    {[0.32, 0.91, 1.48].map((y) => <group key={y}>
-      <mesh position={[0, y, 0]}><boxGeometry args={[1.15, 0.045, 0.72]} /><meshStandardMaterial color="#4c6475" metalness={0.3} /></mesh>
-      <Pallet x={-0.27} y={y + 0.03} z={0} color={boxColor} />
-      {rack.occupied > 60 && <Pallet x={0.27} y={y + 0.03} z={0} color={boxColor} />}
-    </group>)}
-    <mesh position={[0, 2.08, 0]}><boxGeometry args={[0.8, 0.22, 0.08]} /><meshStandardMaterial color={selected ? '#5ee0c1' : '#223544'} /></mesh>
-    <Text position={[0, 2.08, 0.052]} fontSize={0.12} color={selected ? '#06231f' : '#dce8ef'} anchorX="center" anchorY="middle">{rack.id}</Text>
-    {selected && <mesh position={[0, 1.99, 0]}><boxGeometry args={[1.3, 2.22, 0.9]} /><meshBasicMaterial color="#55d6be" transparent opacity={0.08} depthWrite={false} /></mesh>}
-  </group>
-}
-
-/** Shows the tracked phone's actual GPS displacement from its first received fix. */
-function LiveGpsMarker({ gps }: { gps: LiveGpsPosition | null }) {
-  const ref = useRef<THREE.Group>(null)
-  const origin = useRef<{ latitude: number; longitude: number } | null>(null)
-
-  useFrame((_, delta) => {
-    if (!ref.current || !gps) return
-    if (!origin.current) origin.current = { latitude: gps.latitude, longitude: gps.longitude }
-    const lat0 = origin.current.latitude
-    const eastMeters = (gps.longitude - origin.current.longitude) * 111320 * Math.cos(lat0 * Math.PI / 180)
-    const northMeters = (gps.latitude - origin.current.latitude) * 111320
-    const targetX = THREE.MathUtils.clamp(eastMeters * 0.14, -6.5, 6.5)
-    const targetZ = THREE.MathUtils.clamp(-northMeters * 0.14, -4.5, 4.5)
-    ref.current.position.x = THREE.MathUtils.damp(ref.current.position.x, targetX, 4, delta)
-    ref.current.position.z = THREE.MathUtils.damp(ref.current.position.z, targetZ, 4, delta)
-    if (gps.heading_deg != null) {
-      const targetRotation = (90 - gps.heading_deg) * Math.PI / 180
-      ref.current.rotation.y = THREE.MathUtils.damp(ref.current.rotation.y, targetRotation, 4, delta)
-    }
-  })
-
-  const fresh = gps !== null && Date.now() - new Date(gps.recorded_at).getTime() < 30000
-  return <group ref={ref} position={[0, 0, 0]}>
-    <mesh position={[0, 0.12, 0]}><cylinderGeometry args={[0.48, 0.48, 0.06, 32]} /><meshBasicMaterial color={fresh ? '#55d6be' : '#657684'} transparent opacity={0.28} /></mesh>
-    <mesh position={[0, 0.38, 0]}><sphereGeometry args={[0.17, 24, 24]} /><meshStandardMaterial color={fresh ? '#55d6be' : '#657684'} emissive={fresh ? '#1c8e79' : '#26333c'} emissiveIntensity={1.2} /></mesh>
-    <Text position={[0, 0.78, 0]} fontSize={0.16} color={fresh ? '#8df2df' : '#c1ccd3'} anchorX="center" anchorY="middle">{fresh ? 'LIVE DEVICE' : 'GPS WAITING'}</Text>
-  </group>
-}
-
-function WarehouseScene({ racks, selectedRack, setSelectedRack, liveGps }: { racks: RackData[]; selectedRack: string; setSelectedRack: (id: string) => void; liveGps: LiveGpsPosition | null }) {
-  const floorClick = (e: ThreeEvent<MouseEvent>) => { if (e.object.name === 'warehouse-floor') setSelectedRack('') }
-  return <Canvas shadows camera={{ position: [10, 10, 12], fov: 36 }} dpr={[1, 1.6]} onPointerMissed={() => setSelectedRack('')}>
-    <color attach="background" args={['#111b25']} />
-    <fog attach="fog" args={['#111b25', 18, 38]} />
-    <ambientLight intensity={1.4} />
-    <directionalLight position={[8, 12, 6]} intensity={2.6} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
-    <pointLight position={[-4, 6, -3]} intensity={45} color="#58d9c2" distance={18} />
-    <group onClick={floorClick}>
-      <mesh name="warehouse-floor" receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.07, 0]}><planeGeometry args={[18, 13]} /><meshStandardMaterial color="#1b2a36" roughness={0.92} /></mesh>
-      <Grid position={[0, -0.055, 0]} args={[18, 13]} cellSize={0.8} cellThickness={0.5} cellColor="#334654" sectionSize={3.2} sectionThickness={0.8} sectionColor="#476171" fadeDistance={22} infiniteGrid={false} />
-      {[-4.7, -1.3, 2.1].map((x, i) => <mesh key={x} position={[x, 0.005, 0]}><boxGeometry args={[0.08, 0.02, 7.7]} /><meshStandardMaterial color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} emissive={['#155a4e', '#624b18', '#303c7a'][i]} emissiveIntensity={0.3} /></mesh>)}
-      {racks.map((rack) => <Rack key={rack.id} rack={rack} selected={selectedRack === rack.id} onSelect={() => setSelectedRack(rack.id)} />)}
-      {liveGps && <LiveGpsMarker gps={liveGps} />}
-      {[-4.7, -1.3, 2.1].map((x, i) => <Text key={x} position={[x, 0.12, 4.2]} fontSize={0.24} color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} anchorX="center">ZONE {['A', 'B', 'C'][i]}</Text>)}
-      <mesh position={[5.15, 0.025, 0.2]}><boxGeometry args={[2.4, 0.035, 7.8]} /><meshStandardMaterial color="#243643" /></mesh>
-      {[-2.7, -0.7, 1.3].map((z) => <mesh key={z} position={[5.15, 0.05, z]}><boxGeometry args={[2.3, 0.06, 1.4]} /><meshStandardMaterial color="#314958" /></mesh>)}
-    </group>
-    <ContactShadows position={[0, -0.04, 0]} opacity={0.3} scale={22} blur={2.2} far={4} />
+function SpatialScene({ blocks, selectedId, onSelect }: { blocks: WarehouseBlock[]; selectedId: string | null; onSelect: (id: string) => void }) {
+  return <Canvas shadows camera={{ position: [9, 11, 12], fov: 38 }} dpr={[1, 1.6]}>
+    <color attach="background" args={['#101a24']} />
+    <fog attach="fog" args={['#101a24', 22, 45]} />
+    <ambientLight intensity={1.5} />
+    <directionalLight position={[7, 12, 8]} intensity={2.2} castShadow />
+    <pointLight position={[-3, 5, -3]} intensity={24} color="#55d6be" distance={20} />
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]} receiveShadow>
+      <planeGeometry args={[13, 13]} />
+      <meshStandardMaterial color="#172630" roughness={0.95} />
+    </mesh>
+    <Grid position={[0, -0.025, 0]} args={[13, 13]} cellSize={1} cellColor="#344955" sectionSize={3} sectionColor="#4b6472" fadeDistance={24} infiniteGrid={false} />
+    {blocks.map((block) => <SpatialBlock key={block.id} block={block} selected={selectedId === block.id} onSelect={() => onSelect(block.id)} />)}
+    <ContactShadows position={[0, -0.02, 0]} opacity={0.3} scale={20} blur={2} far={5} />
     <Environment preset="city" />
-    <OrbitControls makeDefault minDistance={8} maxDistance={24} maxPolarAngle={Math.PI / 2.05} minPolarAngle={0.35} enableDamping dampingFactor={0.08} />
+    <OrbitControls makeDefault minDistance={8} maxDistance={24} maxPolarAngle={Math.PI / 2.05} enableDamping dampingFactor={0.08} />
   </Canvas>
 }
 
-function StatCard({ title, value, change, positive, icon: Icon, tint }: { title: string; value: string; change: string; positive: boolean; icon: typeof Box; tint: string }) {
-  return <div className="stat-card">
-    <div className="stat-top"><span>{title}</span><span className={'stat-icon ' + tint}><Icon size={17} /></span></div>
-    <div className="stat-value">{value}</div>
-    <div className={'stat-change ' + (positive ? 'positive' : 'negative')}>{positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}{change}<span className="muted"> vs last week</span></div>
-  </div>
-}
-
 export default function App() {
-  const [racks, setRacks] = useState(initialRacks)
-  const [selectedRack, setSelectedRack] = useState('B-01')
-  const [activeNav, setActiveNav] = useState('Overview')
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('All')
-  const [showAlerts, setShowAlerts] = useState(false)
-  const [events, setEvents] = useState(activity)
-  const [liveGps, setLiveGps] = useState<LiveGpsPosition | null>(null)
-  const selected = racks.find((rack) => rack.id === selectedRack)
+  const [blocks, setBlocks] = useState<WarehouseBlock[]>([])
+  const [movements, setMovements] = useState<Movement[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [itemLabel, setItemLabel] = useState('')
+  const [quantity, setQuantity] = useState('1')
+  const [destinationId, setDestinationId] = useState('')
+  const [mode, setMode] = useState<'receive' | 'move'>('receive')
+  const [ownerId, setOwnerId] = useState<string | null>(null)
+
+  const loadData = useCallback(async (uid: string) => {
+    if (!supabase) return
+    const [blockResult, movementResult] = await Promise.all([
+      supabase.from('warehouse_blocks').select('*').eq('owner_id', uid).order('zone').order('x').order('z'),
+      supabase.from('warehouse_movements').select('*').eq('owner_id', uid).order('created_at', { ascending: false }).limit(8),
+    ])
+    if (blockResult.error) throw blockResult.error
+    if (movementResult.error) throw movementResult.error
+    setBlocks((blockResult.data ?? []) as WarehouseBlock[])
+    setMovements((movementResult.data ?? []) as Movement[])
+  }, [])
 
   useEffect(() => {
-    if (!supabase) return
+    if (!supabase) { setLoading(false); setError('Supabase is not configured. Add the Vercel environment variables before using the warehouse.'); return }
     let active = true
     let channel: RealtimeChannel | null = null
-    let pollId: ReturnType<typeof setInterval> | null = null
-    let ownerId = ''
-    const refreshGps = async () => {
-      if (!ownerId || !active) return
-      const { data, error } = await supabase!.from('device_locations')
-        .select('device_id,latitude,longitude,accuracy_m,speed_mps,heading_deg,recorded_at')
-        .eq('owner_id', ownerId)
-        .order('recorded_at', { ascending: false })
-        .limit(1)
-      if (!error && active && data?.[0]) {
-        const latest = data[0] as LiveGpsPosition
-        setLiveGps((current) => current?.recorded_at === latest.recorded_at ? current : latest)
-      }
-    }
-    const connectGps = async () => {
-      const { data: authData } = await supabase!.auth.getUser()
-      const user = authData.user
-      if (!user || !active) return
-      ownerId = user.id
-      await refreshGps()
-      channel = supabase!.channel('waretrack-scene-gps-' + user.id)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'device_locations', filter: 'owner_id=eq.' + user.id }, (payload) => {
-          if (active && payload.new && 'latitude' in payload.new) setLiveGps(payload.new as LiveGpsPosition)
-        })
+    const start = async () => {
+      const { data, error: authError } = await supabase!.auth.getUser()
+      if (authError) throw authError
+      if (!data.user) throw new Error('Sign in to load your warehouse.')
+      if (!active) return
+      setOwnerId(data.user.id)
+      await loadData(data.user.id)
+      if (!active) return
+      channel = supabase!.channel('spatial-warehouse-' + data.user.id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_blocks', filter: 'owner_id=eq.' + data.user.id }, () => { void loadData(data.user.id) })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_movements', filter: 'owner_id=eq.' + data.user.id }, () => { void loadData(data.user.id) })
         .subscribe()
-      // Poll as a fallback in case a Realtime event is missed by the browser.
-      pollId = setInterval(() => { void refreshGps() }, 2500)
     }
-    void connectGps()
-    return () => {
-      active = false
-      if (pollId !== null) clearInterval(pollId)
-      if (channel) void supabase!.removeChannel(channel)
-    }
-  }, [])
-  const visibleShipments = useMemo(() => shipments.filter((s) => (filter === 'All' || s.status === filter) && (s.id + s.company).toLowerCase().includes(search.toLowerCase())), [filter, search])
-  const occupied = Math.round(racks.reduce((sum, rack) => sum + rack.occupied, 0) / racks.reduce((sum, rack) => sum + rack.capacity, 0) * 100)
-  const receiveShipment = () => {
-    const rack = racks.find((item) => item.id === 'A-03')!
-    setRacks((prev) => prev.map((item) => item.id === 'A-03' ? { ...item, occupied: Math.min(100, item.occupied + 8), status: item.occupied + 8 >= 35 ? 'Healthy' : item.status } : item))
-    setEvents((prev) => [{ title: 'Inbound stock received', detail: '8 units · Rack A-03', time: 'Just now', icon: PackageCheck, tone: 'mint' }, ...prev].slice(0, 4))
-    setSelectedRack(rack.id)
+    void start().catch((reason: unknown) => setError(reason instanceof Error ? reason.message : 'Could not load warehouse data.'))
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false; if (channel) void supabase!.removeChannel(channel) }
+  }, [loadData])
+
+  const selected = blocks.find((block) => block.id === selectedId) ?? null
+  const totalCapacity = blocks.reduce((sum, block) => sum + block.capacity_units, 0)
+  const totalOccupied = blocks.reduce((sum, block) => sum + block.occupied_units, 0)
+  const occupiedBlocks = blocks.filter((block) => block.occupied_units > 0).length
+  const freeBlocks = blocks.filter((block) => block.occupied_units === 0).length
+  const formatTime = (value: string) => new Date(value).toLocaleString()
+  const codeFor = (id: string | null) => blocks.find((block) => block.id === id)?.block_code ?? 'Warehouse'
+
+  const createLayout = async () => {
+    if (!supabase || !ownerId) return
+    setBusy(true); setError(''); setNotice('')
+    try {
+      const rows: Omit<WarehouseBlock, 'id' | 'created_at' | 'updated_at'>[] = []
+      for (const [zoneIndex, zone] of ['A', 'B', 'C'].entries()) {
+        for (let aisle = 1; aisle <= 3; aisle++) {
+          rows.push({
+            owner_id: ownerId,
+            block_code: zone + '-' + String(aisle).padStart(2, '0'),
+            zone,
+            x: zoneIndex,
+            y: 0,
+            z: aisle - 1,
+            capacity_units: 100,
+            occupied_units: 0,
+            item_label: null,
+          } as Omit<WarehouseBlock, 'id' | 'created_at' | 'updated_at'>)
+        }
+      }
+      const { error: insertError } = await supabase.from('warehouse_blocks').insert(rows)
+      if (insertError) throw insertError
+      await loadData(ownerId)
+      setNotice('Warehouse grid created. All blocks start empty; receive your actual stock to begin.')
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not create the warehouse grid.') }
+    finally { setBusy(false) }
   }
-  const navItems = [
-    { label: 'Overview', icon: LayoutDashboard },
-    { label: 'Inventory', icon: Package },
-    { label: 'Shipments', icon: Truck },
-    { label: 'Warehouse map', icon: Warehouse },
-    { label: 'Analytics', icon: Activity },
-  ]
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><Warehouse size={21} /></div><div><b>waretrack</b><span>WAREHOUSE OS</span></div></div>
-      <div className="workspace"><div className="workspace-avatar">N</div><div className="workspace-copy"><strong>Northstar Logistics</strong><span>Enterprise workspace</span></div><ChevronDown size={15} /></div>
-      <div className="side-label">WORKSPACE</div>
-      <nav>{navItems.map(({ label, icon: Icon }) => <button key={label} className={'nav-item ' + (activeNav === label ? 'active' : '')} onClick={() => setActiveNav(label)}><Icon size={17} /><span>{label}</span>{label === 'Shipments' && <small>3</small>}</button>)}</nav>
-      <div className="side-label tools-label">MANAGE</div>
-      <nav>
-        <button className="nav-item" onClick={() => setShowAlerts((v) => !v)}><Bell size={17} /><span>Alerts</span><small className="alert-count">2</small></button>
-        <button className="nav-item" onClick={() => setActiveNav('Settings')}><Settings2 size={17} /><span>Settings</span></button>
-      </nav>
-      <div className="sidebar-bottom"><div className="help-card"><div className="help-icon"><CircleHelp size={17} /></div><strong>Need a hand?</strong><p>Visit the operations guide for quick answers.</p><button onClick={() => setShowAlerts(true)}>Open help centre <ChevronRight size={13} /></button></div><div className="user-profile"><div className="user-avatar">DI</div><div><strong>David Igweonyia</strong><span>Operations manager</span></div><Ellipsis size={18} /></div></div>
+
+  const submitStock = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!supabase || !ownerId || !selected) return
+    const qty = Number(quantity)
+    if (!Number.isInteger(qty) || qty <= 0) { setError('Enter a whole-number quantity greater than zero.'); return }
+    setBusy(true); setError(''); setNotice('')
+    try {
+      if (mode === 'receive') {
+        const { error: rpcError } = await supabase.rpc('receive_warehouse_stock', { p_block_id: selected.id, p_item_label: itemLabel, p_quantity: qty })
+        if (rpcError) throw rpcError
+        setNotice('Received ' + qty + ' units of ' + itemLabel.trim() + ' into ' + selected.block_code + '.')
+        setItemLabel('')
+      } else {
+        if (!destinationId) throw new Error('Choose a destination block.')
+        const { error: rpcError } = await supabase.rpc('move_warehouse_stock', { p_from_block_id: selected.id, p_to_block_id: destinationId, p_quantity: qty })
+        if (rpcError) throw rpcError
+        setNotice('Moved ' + qty + ' units from ' + selected.block_code + ' to ' + codeFor(destinationId) + '.')
+      }
+      await loadData(ownerId)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'The stock operation failed.') }
+    finally { setBusy(false) }
+  }
+
+  const refresh = async () => {
+    if (!ownerId) return
+    setBusy(true); setError('')
+    try { await loadData(ownerId); setNotice('Warehouse data refreshed.') }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'Refresh failed.') }
+    finally { setBusy(false) }
+  }
+
+  const availableDestinations = useMemo(() => blocks.filter((block) => block.id !== selected?.id && (block.occupied_units === 0 || block.item_label === selected?.item_label) && block.occupied_units < block.capacity_units), [blocks, selected])
+
+  return <div className="spatial-app">
+    <aside className="spatial-sidebar">
+      <div className="spatial-brand"><span><Warehouse size={22} /></span><div><strong>WareTrack</strong><small>WAREHOUSE OS</small></div></div>
+      <div className="spatial-side-label">WORKSPACE</div>
+      <div className="spatial-nav active"><Layers3 size={17} /> Spatial warehouse</div>
+      <div className="spatial-sidebar-note"><strong>Coordinate system</strong><p>Every storage block has a permanent zone and X/Y/Z coordinate. Stock only changes when an operator records a real action.</p></div>
+      <div className="spatial-sidebar-bottom"><span className="spatial-status-dot" /> Connected to your workspace</div>
     </aside>
-    <main className="main-area">
-      <header className="topbar"><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14} /><strong>{activeNav}</strong></div><div className="top-actions"><div className="system-status"><span className="live-dot" /> All systems operational</div><button className="icon-button" aria-label="Notifications" onClick={() => setShowAlerts((v) => !v)}><Bell size={18} /><i /></button><div className="top-avatar">DI</div></div></header>
-      <div className="page-content">
-        <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot" /> REAL DEVICE TRACKING</div><h1>Live device location<span className="period">.</span></h1><p>Track the real location updates received from your connected phone.</p></div><div className="welcome-actions"><button className="button-secondary" onClick={() => setShowAlerts((v) => !v)}><CalendarDays size={16} /> Today <ChevronDown size={14} /></button><button className="button-primary" onClick={receiveShipment}><Plus size={17} /> Receive stock</button></div></div>
-        {showAlerts && <div className="alert-banner"><AlertTriangle size={18} /><div><strong>2 items need attention</strong><span>Rack B-01 is near capacity · Rack A-03 is below target stock.</span></div><button onClick={() => { setShowAlerts(false); setSelectedRack('B-01') }}>Review alerts <ChevronRight size={14} /></button></div>}
-        <LiveGpsPanel />
-        <div className="stats-grid">
-          <StatCard title="Total inventory" value="12,840" change="+8.2%" positive icon={Box} tint="mint-bg" />
-          <StatCard title="Active shipments" value="36" change="+4.6%" positive icon={Truck} tint="blue-bg" />
-          <StatCard title="Warehouse capacity" value={occupied + '%'} change="+2.1%" positive icon={Warehouse} tint="violet-bg" />
-          <StatCard title="On-time dispatch" value="98.4%" change="−0.4%" positive={false} icon={Zap} tint="amber-bg" />
+    <main className="spatial-main">
+      <header className="spatial-topbar"><div><span>Warehouse</span><b>/</b><strong>Spatial inventory</strong></div><button onClick={refresh} disabled={busy}><RefreshCw size={15} /> Refresh data</button></header>
+      <div className="spatial-content">
+        <div className="spatial-heading"><div><div className="spatial-eyebrow"><span /> PERSISTENT WAREHOUSE DATA</div><h1>Spatial warehouse<span>.</span></h1><p>Manage actual stock by block coordinates. Changes are saved to your workspace.</p></div><div className="spatial-heading-chip"><MapPin size={16} /> X · Y · Z grid</div></div>
+        {error && <div className="spatial-alert error"><AlertCircle size={17} /><span>{error}</span></div>}
+        {notice && <div className="spatial-alert success"><CheckCircle2 size={17} /><span>{notice}</span></div>}
+        <div className="spatial-stats">
+          <div><small>STOCK UNITS</small><strong>{totalOccupied.toLocaleString()}</strong><span>Recorded in blocks</span></div>
+          <div><small>BLOCK CAPACITY</small><strong>{totalCapacity.toLocaleString()}</strong><span>{blocks.length} configured blocks</span></div>
+          <div><small>OCCUPIED BLOCKS</small><strong>{occupiedBlocks}</strong><span>Blocks with recorded stock</span></div>
+          <div><small>EMPTY BLOCKS</small><strong>{freeBlocks}</strong><span>Available storage blocks</span></div>
         </div>
-        <div className="section-heading"><div><h2>Live warehouse floor</h2><p>Storage racks are illustrative; the marker moves only from actual GPS updates.</p></div><div className="map-tools"><span className="live-pill"><span className={liveGps && Date.now() - new Date(liveGps.recorded_at).getTime() < 30000 ? "live-dot" : "legend-dot"} /> {liveGps && Date.now() - new Date(liveGps.recorded_at).getTime() < 30000 ? "GPS RECEIVING" : "WAITING FOR GPS"}</span><button className="square-button" onClick={() => setSelectedRack('')} title="Clear rack selection"><RotateCcw size={16} /></button></div></div>
-        <div className="warehouse-grid">
-          <section className="warehouse-card"><div className="warehouse-card-head"><div><div className="card-title">Distribution centre <span className="tiny-badge">DC-01</span></div><div className="card-subtitle"><MapPin size={13} /> Lagos, Nigeria <span className="separator">·</span> 3 storage zones</div></div><button className="square-button" onClick={() => setSelectedRack('')} title="Reset selection"><Settings2 size={16} /></button></div><div className="scene-wrap"><WarehouseScene racks={racks} selectedRack={selectedRack} setSelectedRack={setSelectedRack} liveGps={liveGps} /><div className="scene-legend"><span><i className="legend-dot mint" /> Zone A</span><span><i className="legend-dot amber" /> Zone B</span><span><i className="legend-dot violet" /> Zone C</span><span className="legend-help"><Command size={12} /> Drag to rotate</span></div><div className="scene-corner">GPS-DRIVEN DEVICE VIEW <span>·</span> {liveGps ? "LOCATION RECEIVED" : "WAITING FOR FIRST FIX"}</div></div><div className="zone-summary">{[['A','Inbound & storage','74%','#56cdb5'],['B','Bulk inventory','86%','#e6b85c'],['C','Outbound staging','51%','#7b8cf2']].map(([zone, name, value, color]) => <div className="zone-item" key={zone}><div className="zone-head"><span className="zone-letter" style={{ color, borderColor: color }}>{zone}</span><span className="zone-name">{name}</span><strong>{value}</strong></div><div className="progress-track"><span style={{ width: value, background: color }} /></div></div>)}</div></section>
-          <aside className="detail-card"><div className="detail-header"><div><span className="overline">SELECTED LOCATION</span><h3>{selected ? 'Rack ' + selected.id : 'Warehouse details'}</h3></div><button className="square-button"><Ellipsis size={17} /></button></div>{selected ? <><div className="rack-visual"><div className="rack-visual-icon"><Package size={26} /></div><div><strong>Storage rack {selected.id}</strong><span>Zone {selected.zone} · Aisle {selected.id.slice(-1)}</span></div><span className={'status-tag ' + (selected.status === 'Healthy' ? 'status-healthy' : selected.status === 'Attention' ? 'status-attention' : 'status-low')}>{selected.status}</span></div><div className="capacity-block"><div><span>Rack utilisation</span><strong>{selected.occupied}%</strong></div><div className="capacity-track"><span style={{ width: selected.occupied + '%', background: selected.status === 'Attention' ? '#ed8a59' : '#55d6be' }} /></div><div className="capacity-meta"><span>{Math.round(selected.occupied * 0.42)} pallet positions used</span><span>{100 - selected.occupied}% free</span></div></div><div className="detail-metrics"><div><span>SKUs stored</span><strong>{Math.round(selected.occupied * 1.7)}</strong></div><div><span>Available slots</span><strong>{100 - selected.occupied}</strong></div></div><div className="detail-divider" /><div className="mini-heading">RECENT MOVEMENTS <button onClick={() => setActiveNav('Inventory')}>View all <ChevronRight size={13} /></button></div><div className="movement"><span className="movement-icon inbound"><ArrowDownRight size={15} /></span><div><strong>Stock replenished</strong><span>SKU-{selected.id.replace('-', '')}-04</span></div><time>09:24</time></div><div className="movement"><span className="movement-icon outbound"><ArrowUpRight size={15} /></span><div><strong>Order picked</strong><span>ORD-4021 · 4 units</span></div><time>09:12</time></div><button className="button-outline full-button" onClick={receiveShipment}><Plus size={15} /> Receive stock at this rack</button></> : <div className="empty-detail"><Warehouse size={28} /><strong>Select a storage rack</strong><span>Click any rack in the 3D floor view to inspect its stock and movements.</span></div>}</aside>
-        </div>
-        <div className="lower-grid"><section className="panel"><div className="panel-heading"><div><h2>Shipment schedule</h2><p>Inbound and outbound activity for today.</p></div><button className="text-button" onClick={() => setActiveNav('Shipments')}>View all <ChevronRight size={14} /></button></div><div className="table-controls"><div className="search-box"><Search size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search shipments..." /></div><select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter shipments"><option>All</option><option>Loading</option><option>In transit</option><option>Queued</option></select></div><div className="shipment-list"><div className="shipment-table-head"><span>SHIPMENT</span><span>ITEMS</span><span>ETA</span><span>STATUS</span></div>{visibleShipments.map((s) => <div className="shipment-row" key={s.id}><div className="shipment-id"><span className="shipment-dot" style={{ background: s.color }} /><div><strong>{s.id}</strong><small>{s.company}</small></div></div><span>{s.items} items</span><span className="eta"><Clock3 size={13} />{s.eta}</span><span className={'shipment-status ' + s.status.toLowerCase().replace(' ', '-')}>{s.status}</span></div>)}{visibleShipments.length === 0 && <div className="no-results">No shipments match your search.</div>}</div></section><section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Live updates from your warehouse.</p></div><button className="square-button" onClick={() => setEvents(activity)} title="Reset activity"><Activity size={16} /></button></div><div className="activity-list">{events.map((event, i) => { const Icon = event.icon; return <div className="activity-row" key={event.title + i}><span className={'activity-icon ' + event.tone}><Icon size={15} /></span><div className="activity-copy"><strong>{event.title}</strong><span>{event.detail}</span></div><time>{event.time}</time></div> })}</div><div className="activity-footer"><span className="live-dot" /> Events shown here are sample records, not live vehicle telemetry</div></section></div>
-        <footer className="footer"><span>© 2026 WareTrack Operations</span><span><ShieldCheck size={13} /> All systems operational</span><span>Built for the warehouse floor <span className="footer-heart">✦</span></span></footer>
+        <section className="spatial-map-card">
+          <div className="spatial-card-header"><div><h2>Warehouse coordinate grid</h2><p>Select a block to inspect or update its stock.</p></div><span className="spatial-live-label"><i /> SAVED DATA</span></div>
+          {loading ? <div className="spatial-empty">Loading your warehouse…</div> : blocks.length === 0 ? <div className="spatial-empty"><Warehouse size={34} /><strong>Your warehouse layout hasn't been created</strong><span>Create a 3×3 block grid. It starts empty—no sample stock or fabricated movement records.</span><button onClick={createLayout} disabled={busy}><Plus size={16} /> Create warehouse grid</button></div> : <>
+            <div className="spatial-scene"><SpatialScene blocks={blocks} selectedId={selected?.id ?? null} onSelect={setSelectedId} /><div className="spatial-scene-caption">Click a block · Drag to rotate · Scroll to zoom</div></div>
+            <div className="spatial-block-list">{blocks.map((block) => <button key={block.id} className={'spatial-block-chip ' + (selected?.id === block.id ? 'selected' : '')} onClick={() => setSelectedId(block.id)}><span>{block.block_code}</span><small>{block.occupied_units}/{block.capacity_units}</small></button>)}</div>
+          </>}
+        </section>
+        {selected && <div className="spatial-detail-grid">
+          <section className="spatial-panel">
+            <div className="spatial-card-header"><div><h2>Block {selected.block_code}</h2><p>Zone {selected.zone} · Coordinate X:{selected.x} Y:{selected.y} Z:{selected.z}</p></div><span className={'spatial-fill-tag ' + (selected.occupied_units ? 'has-stock' : '')}>{selected.occupied_units ? 'STOCK PRESENT' : 'EMPTY BLOCK'}</span></div>
+            <div className="spatial-capacity"><div><span>Capacity used</span><strong>{Math.round(selected.occupied_units / selected.capacity_units * 100)}%</strong></div><div className="spatial-progress"><span style={{ width: (selected.occupied_units / selected.capacity_units * 100) + '%' }} /></div><small>{selected.occupied_units} units stored · {selected.capacity_units - selected.occupied_units} units free</small></div>
+            <div className="spatial-current-item"><Package size={18} /><div><small>ITEM / SKU IN THIS BLOCK</small><strong>{selected.item_label ?? 'No item recorded'}</strong></div></div>
+            <div className="spatial-mode-tabs"><button className={mode === 'receive' ? 'active' : ''} onClick={() => setMode('receive')}><Plus size={15} /> Receive stock</button><button className={mode === 'move' ? 'active' : ''} onClick={() => setMode('move')} disabled={selected.occupied_units === 0}><ArrowRightLeft size={15} /> Move stock</button></div>
+            <form className="spatial-stock-form" onSubmit={submitStock}>
+              {mode === 'receive' ? <label>Item name or SKU<input required value={itemLabel} onChange={(e) => setItemLabel(e.target.value)} placeholder="Enter actual product or SKU" /></label> : <label>Destination block<select required value={destinationId} onChange={(e) => setDestinationId(e.target.value)}><option value="">Choose destination</option>{availableDestinations.map((block) => <option key={block.id} value={block.id}>{block.block_code} · {block.capacity_units - block.occupied_units} units free</option>)}</select></label>}
+              <label>Quantity<input required type="number" min="1" step="1" max={mode === 'receive' ? selected.capacity_units - selected.occupied_units : selected.occupied_units} value={quantity} onChange={(e) => setQuantity(e.target.value)} /></label>
+              <button type="submit" disabled={busy || (mode === 'move' && availableDestinations.length === 0)}>{busy ? 'Saving…' : mode === 'receive' ? 'Save received stock' : 'Confirm stock movement'}</button>
+            </form>
+            <p className="spatial-footnote">Stock operations are validated and recorded in the database. A block cannot exceed its capacity or mix different item labels.</p>
+          </section>
+          <section className="spatial-panel">
+            <div className="spatial-card-header"><div><h2>Movement ledger</h2><p>Latest saved stock operations across your warehouse.</p></div></div>
+            {movements.length === 0 ? <div className="spatial-ledger-empty">No movements recorded yet. Receive stock to start the ledger.</div> : <div className="spatial-ledger">{movements.map((movement) => <div className="spatial-ledger-row" key={movement.id}><span className={'spatial-ledger-icon ' + movement.movement_type}>{movement.movement_type === 'move' ? <ArrowRightLeft size={16} /> : <Package size={16} />}</span><div><strong>{movement.item_label}</strong><span>{movement.movement_type === 'receive' ? 'Received into ' + codeFor(movement.to_block_id) : movement.movement_type === 'move' ? codeFor(movement.from_block_id) + ' → ' + codeFor(movement.to_block_id) : 'Dispatched from ' + codeFor(movement.from_block_id)}</span><small>{formatTime(movement.created_at)}</small></div><b>{movement.movement_type === 'receive' ? '+' : '−'}{movement.quantity}</b></div>)}</div>}
+          </section>
+        </div>}
+        <footer className="spatial-footer">WareTrack · Warehouse coordinates and inventory are saved to your authenticated workspace.</footer>
       </div>
     </main>
-    <button className="floating-help" onClick={() => setShowAlerts((v) => !v)} aria-label="Help"><CircleHelp size={19} /></button>
   </div>
 }
