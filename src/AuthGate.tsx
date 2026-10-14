@@ -1,4 +1,5 @@
-import { FormEvent, ReactNode, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { LockKeyhole, Truck } from 'lucide-react'
 import { supabase, supabaseConfigured } from './lib/supabase'
