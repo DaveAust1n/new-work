@@ -3,6 +3,8 @@ import { Canvas, useFrame } from '@react-three/fiber'
 import { ContactShadows, Environment, Grid, OrbitControls, Text } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
+import LiveGpsPanel from './LiveGpsPanel'
+import './gps-live.css'
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
   ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Ellipsis, Pause, Play, RotateCcw,
@@ -197,6 +199,7 @@ export default function App() {
       <div className="page-content">
         <div className="welcome-row"><div><div className="eyebrow"><span className="live-dot" /> WAREHOUSE SIMULATION · LIVE</div><h1>Warehouse in motion<span className="period">.</span></h1><p>Watch stock move, forklifts work, and deliveries flow through your facility.</p></div><div className="welcome-actions"><button className="button-secondary" onClick={() => setShowAlerts((v) => !v)}><CalendarDays size={16} /> Today <ChevronDown size={14} /></button><button className="button-primary" onClick={receiveShipment}><Plus size={17} /> Receive stock</button></div></div>
         {showAlerts && <div className="alert-banner"><AlertTriangle size={18} /><div><strong>2 items need attention</strong><span>Rack B-01 is near capacity · Rack A-03 is below target stock.</span></div><button onClick={() => { setShowAlerts(false); setSelectedRack('B-01') }}>Review alerts <ChevronRight size={14} /></button></div>}
+        <LiveGpsPanel />
         <div className="stats-grid">
           <StatCard title="Total inventory" value="12,840" change="+8.2%" positive icon={Box} tint="mint-bg" />
           <StatCard title="Active shipments" value="36" change="+4.6%" positive icon={Truck} tint="blue-bg" />
