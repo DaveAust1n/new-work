@@ -75,10 +75,10 @@ export default function PhoneTracker() {
       setError('GPS access requires a secure HTTPS page.')
       return
     }
-    // Prevent duplicate watchers if Start is pressed again after a GPS error.
     if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
     if (refreshId.current !== null) clearInterval(refreshId.current)
     setPermissionHint('Waiting for location permission…')
+
     const handlePosition = (result: GeolocationPosition) => {
       const next: PositionSnapshot = {
         latitude: result.coords.latitude,
@@ -103,30 +103,14 @@ export default function PhoneTracker() {
           : 'Location request timed out. Keep this page open and try again with a clearer GPS signal.'
       setError(message)
       setPermissionHint('GPS update failed — retrying while tracking is open')
-      // Keep the watcher alive: the browser may recover when GPS signal improves.
     }
+
     watchId.current = navigator.geolocation.watchPosition(
       handlePosition,
-      (result) => {
-        const next: PositionSnapshot = {
-          latitude: result.coords.latitude,
-          longitude: result.coords.longitude,
-          accuracy: result.coords.accuracy,
-          speed: result.coords.speed,
-          heading: result.coords.heading,
-          timestamp: result.timestamp,
-        }
-        setPosition(next)
-        void publishPosition(next)
-        setUpdatedAt(new Date(result.timestamp).toLocaleTimeString())
-        setPermissionHint('Phone GPS is active')
-        setTracking(true)
-      },
       handleError,
       { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 },
     )
-    // Some mobile browsers stop delivering watchPosition callbacks. Ask for a fresh
-    // one-shot fix periodically as a fallback, with caching disabled.
+    // Fallback for mobile browsers that stop delivering watchPosition callbacks.
     refreshId.current = setInterval(() => {
       if (document.visibilityState !== 'visible') return
       navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
