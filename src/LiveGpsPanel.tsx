@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MapPin, Radio, Smartphone } from 'lucide-react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 
 type DeviceLocation = { device_id: string; latitude: number; longitude: number; accuracy_m: number | null; speed_mps: number | null; heading_deg: number | null; recorded_at: string }
@@ -12,7 +13,7 @@ export default function LiveGpsPanel() {
   useEffect(() => {
     if (!supabase) { setLoading(false); return }
     let active = true
-    let channel: ReturnType<typeof supabase.channel> | null = null
+    let channel: RealtimeChannel | null = null
     const connect = async () => {
       const { data: userData } = await supabase!.auth.getUser()
       const user = userData.user
