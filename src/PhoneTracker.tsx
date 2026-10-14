@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Activity, ArrowLeft, Crosshair, MapPin, Navigation, Radio, ShieldCheck, Truck } from 'lucide-react'
 import './phone-tracker.css'
+import { supabase } from './lib/supabase'
 
 type PositionSnapshot = {
   latitude: number
@@ -18,6 +19,37 @@ export default function PhoneTracker() {
   const [permissionHint, setPermissionHint] = useState('Ready to request your phone GPS')
   const [updatedAt, setUpdatedAt] = useState('')
   const watchId = useRef<number | null>(null)
+  const deviceId = useRef<string | null>(null)
+  const [syncError, setSyncError] = useState('')
+
+  const publishPosition = async (next: PositionSnapshot) => {
+    if (!supabase) { setSyncError('Backend configuration is missing.'); return }
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser()
+      if (authError) throw authError
+      const user = authData.user
+      if (!user) { setSyncError('Sign in with the same WareTrack account used on the computer.'); return }
+      if (!deviceId.current) {
+        const { data: existing, error: lookupError } = await supabase.from('tracking_devices').select('id').eq('owner_id', user.id).eq('device_name', 'PHONE-01').maybeSingle()
+        if (lookupError) throw lookupError
+        if (existing) deviceId.current = existing.id
+        else {
+          const { data: created, error: createError } = await supabase.from('tracking_devices').insert({ owner_id: user.id, device_name: 'PHONE-01', device_type: 'phone' }).select('id').single()
+          if (createError) throw createError
+          deviceId.current = created.id
+        }
+      }
+      const recordedAt = new Date(next.timestamp).toISOString()
+      const { error: writeError } = await supabase.from('device_locations').upsert({ device_id: deviceId.current, owner_id: user.id, latitude: next.latitude, longitude: next.longitude, accuracy_m: next.accuracy, speed_mps: next.speed, heading_deg: next.heading, recorded_at: recordedAt })
+      if (writeError) throw writeError
+      const { error: seenError } = await supabase.from('tracking_devices').update({ last_seen_at: recordedAt }).eq('id', deviceId.current).eq('owner_id', user.id)
+      if (seenError) throw seenError
+      setSyncError('')
+      setPermissionHint('GPS active · sending updates to dashboard')
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Could not sync GPS to the dashboard.')
+    }
+  }
 
   const stopTracking = () => {
     if (watchId.current !== null && 'geolocation' in navigator) {
@@ -50,6 +82,7 @@ export default function PhoneTracker() {
           timestamp: result.timestamp,
         }
         setPosition(next)
+        void publishPosition(next)
         setUpdatedAt(new Date(result.timestamp).toLocaleTimeString())
         setPermissionHint('Phone GPS is active')
         setTracking(true)
@@ -107,6 +140,7 @@ export default function PhoneTracker() {
       </div>
 
       {error && <div className="phone-track-error" role="alert">{error}</div>}
+      {syncError && <div className="phone-track-error" role="alert">Dashboard sync: {syncError}</div>}
 
       <div className="phone-track-metrics">
         <div><span>LATITUDE</span><strong>{position ? position.latitude.toFixed(6) : '—'}</strong></div>
@@ -116,7 +150,7 @@ export default function PhoneTracker() {
       </div>
 
       <div className="phone-track-status"><Activity size={16} /><div><strong>{permissionHint}</strong><span>{updatedAt ? 'Last GPS update: ' + updatedAt : 'No location updates received yet'}</span></div></div>
-      <div className="phone-track-privacy"><ShieldCheck size={16} /><p><strong>Privacy note</strong> This prototype displays location on this phone only. It does not send coordinates to the WareTrack dashboard yet. Keep the page open during testing and stop tracking when finished.</p></div>
+      <div className="phone-track-privacy"><ShieldCheck size={16} /><p><strong>Privacy note</strong> When tracking is active, coordinates are sent to your private WareTrack workspace. Sign in with the same account on your computer. Keep this page open during testing and stop tracking when finished.</p></div>
     </section>
     <footer className="phone-track-footer">WARETRACK · REAL-WORLD DEVICE TESTING</footer>
   </main>
