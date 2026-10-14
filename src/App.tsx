@@ -4,6 +4,8 @@ import { ContactShadows, Environment, Grid, OrbitControls, Text } from '@react-t
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import LiveGpsPanel from './LiveGpsPanel'
+import { supabase } from './lib/supabase'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import './gps-live.css'
 import {
   Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Box, CalendarDays,
@@ -13,6 +15,7 @@ import {
 } from 'lucide-react'
 
 type RackData = { id: string; zone: string; x: number; z: number; occupied: number; capacity: number; status: 'Healthy' | 'Low stock' | 'Attention' }
+type LiveGpsPosition = { device_id: string; latitude: number; longitude: number; accuracy_m: number | null; speed_mps: number | null; heading_deg: number | null; recorded_at: string }
 const initialRacks: RackData[] = [
   { id: 'A-01', zone: 'A', x: -5.2, z: -2.2, occupied: 82, capacity: 100, status: 'Healthy' },
   { id: 'A-02', zone: 'A', x: -5.2, z: 0, occupied: 64, capacity: 100, status: 'Healthy' },
@@ -105,7 +108,43 @@ function DeliveryTruck({ x, z, color, offset, speed, running }: { x: number; z: 
   </group>
 }
 
-function WarehouseScene({ racks, selectedRack, setSelectedRack, running, speed }: { racks: RackData[]; selectedRack: string; setSelectedRack: (id: string) => void; running: boolean; speed: number }) {
+/** A scene marker driven by the latest real phone GPS fix. Its first fix is the local anchor. */
+function LiveGpsTruck({ gps }: { gps: LiveGpsPosition | null }) {
+  const ref = useRef<THREE.Group>(null)
+  const origin = useRef<{ latitude: number; longitude: number } | null>(null)
+
+  useFrame((_, delta) => {
+    if (!ref.current) return
+    if (gps && !origin.current) origin.current = { latitude: gps.latitude, longitude: gps.longitude }
+
+    let targetX = 5.1
+    let targetZ = 0.2
+    if (gps && origin.current) {
+      const lat0 = origin.current.latitude
+      const eastMeters = (gps.longitude - origin.current.longitude) * 111320 * Math.cos(lat0 * Math.PI / 180)
+      const northMeters = (gps.latitude - origin.current.latitude) * 111320
+      targetX += THREE.MathUtils.clamp(eastMeters * 0.14, -1.7, 1.7)
+      targetZ += THREE.MathUtils.clamp(-northMeters * 0.14, -2.7, 2.7)
+    }
+
+    ref.current.position.x = THREE.MathUtils.damp(ref.current.position.x, targetX, 4, delta)
+    ref.current.position.z = THREE.MathUtils.damp(ref.current.position.z, targetZ, 4, delta)
+    if (gps?.heading_deg != null) {
+      const targetRotation = (90 - gps.heading_deg) * Math.PI / 180
+      ref.current.rotation.y = THREE.MathUtils.damp(ref.current.rotation.y, targetRotation, 4, delta)
+    }
+  })
+
+  const fresh = gps !== null && Date.now() - new Date(gps.recorded_at).getTime() < 30000
+  return <group ref={ref} position={[5.1, 0, 0.2]}>
+    <mesh castShadow position={[0, 0.35, 0]}><boxGeometry args={[1.45, 0.55, 0.58]} /><meshStandardMaterial color={fresh ? '#f7b84b' : '#657684'} roughness={0.55} /></mesh>
+    <mesh castShadow position={[0.55, 0.55, 0]}><boxGeometry args={[0.42, 0.45, 0.56]} /><meshStandardMaterial color="#a8d2dc" metalness={0.12} roughness={0.3} /></mesh>
+    {[-0.43, 0.45].map((wx) => [-0.27, 0.27].map((wz) => <mesh key={wx + ':' + wz} rotation={[Math.PI / 2, 0, 0]} position={[wx, 0.16, wz]}><cylinderGeometry args={[0.12, 0.12, 0.09, 12]} /><meshStandardMaterial color="#17242c" /></mesh>))}
+    <Text position={[0, 0.95, 0]} fontSize={0.15} color={fresh ? '#f7d68d' : '#c1ccd3'} anchorX="center" anchorY="middle">{fresh ? 'LIVE GPS' : 'GPS WAITING'}</Text>
+  </group>
+}
+
+function WarehouseScene({ racks, selectedRack, setSelectedRack, running, speed, liveGps }: { racks: RackData[]; selectedRack: string; setSelectedRack: (id: string) => void; running: boolean; speed: number; liveGps: LiveGpsPosition | null }) {
   const floorClick = (e: ThreeEvent<MouseEvent>) => { if (e.object.name === 'warehouse-floor') setSelectedRack('') }
   return <Canvas shadows camera={{ position: [10, 10, 12], fov: 36 }} dpr={[1, 1.6]} onPointerMissed={() => setSelectedRack('')}>
     <color attach="background" args={['#111b25']} />
@@ -118,8 +157,8 @@ function WarehouseScene({ racks, selectedRack, setSelectedRack, running, speed }
       <Grid position={[0, -0.055, 0]} args={[18, 13]} cellSize={0.8} cellThickness={0.5} cellColor="#334654" sectionSize={3.2} sectionThickness={0.8} sectionColor="#476171" fadeDistance={22} infiniteGrid={false} />
       {[-4.7, -1.3, 2.1].map((x, i) => <mesh key={x} position={[x, 0.005, 0]}><boxGeometry args={[0.08, 0.02, 7.7]} /><meshStandardMaterial color={['#56cdb5', '#e6b85c', '#7b8cf2'][i]} emissive={['#155a4e', '#624b18', '#303c7a'][i]} emissiveIntensity={0.3} /></mesh>)}
       {racks.map((rack) => <Rack key={rack.id} rack={rack} selected={selectedRack === rack.id} onSelect={() => setSelectedRack(rack.id)} />)}
-      <DeliveryTruck x={5.1} z={-3.3} color="#4679d8" offset={0} speed={speed} running={running} />
-      <DeliveryTruck x={5.1} z={-1.3} color="#54bda8" offset={5} speed={speed} running={running} />
+      <LiveGpsTruck gps={liveGps} />
+      <DeliveryTruck x={5.1} z={-2.5} color="#54bda8" offset={5} speed={speed} running={running} />
       <ForkliftModel offset={0} speed={speed} running={running} />
       <ForkliftModel offset={4.2} speed={speed * 0.82} running={running} color="#58b8d5" />
       <ForkliftModel offset={8.3} speed={speed * 0.68} running={running} color="#b18af4" />
@@ -151,7 +190,32 @@ export default function App() {
   const [simulationRunning, setSimulationRunning] = useState(true)
   const [simulationSpeed, setSimulationSpeed] = useState(1)
   const [events, setEvents] = useState(activity)
+  const [liveGps, setLiveGps] = useState<LiveGpsPosition | null>(null)
   const selected = racks.find((rack) => rack.id === selectedRack)
+
+  useEffect(() => {
+    if (!supabase) return
+    let active = true
+    let channel: RealtimeChannel | null = null
+    const connectGps = async () => {
+      const { data: authData } = await supabase!.auth.getUser()
+      const user = authData.user
+      if (!user || !active) return
+      const { data } = await supabase!.from('device_locations')
+        .select('device_id,latitude,longitude,accuracy_m,speed_mps,heading_deg,recorded_at')
+        .eq('owner_id', user.id)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+      if (active && data?.[0]) setLiveGps(data[0] as LiveGpsPosition)
+      channel = supabase!.channel('waretrack-scene-gps-' + user.id)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'device_locations', filter: 'owner_id=eq.' + user.id }, (payload) => {
+          if (active && payload.new && 'latitude' in payload.new) setLiveGps(payload.new as LiveGpsPosition)
+        })
+        .subscribe()
+    }
+    void connectGps()
+    return () => { active = false; if (channel) void supabase!.removeChannel(channel) }
+  }, [])
   useEffect(() => {
     if (!simulationRunning) return
     const timer = window.setInterval(() => {
@@ -208,7 +272,7 @@ export default function App() {
         </div>
         <div className="section-heading"><div><h2>Live warehouse floor</h2><p>The 3D world is the control room. Select racks, follow vehicles, and watch deliveries move.</p></div><div className="map-tools"><span className="live-pill"><span className="live-dot" /> {simulationRunning ? "LIVE SIMULATION" : "SIMULATION PAUSED"}</span><button className="square-button" onClick={() => setSimulationRunning((v) => !v)} title={simulationRunning ? "Pause simulation" : "Resume simulation"}>{simulationRunning ? <Pause size={16} /> : <Play size={16} />}</button><button className="square-button" onClick={() => { setSelectedRack(''); setSimulationSpeed(1) }} title="Reset view and speed"><RotateCcw size={16} /></button></div></div>
         <div className="warehouse-grid">
-          <section className="warehouse-card"><div className="warehouse-card-head"><div><div className="card-title">Distribution centre <span className="tiny-badge">DC-01</span></div><div className="card-subtitle"><MapPin size={13} /> Lagos, Nigeria <span className="separator">·</span> 3 storage zones</div></div><button className="square-button" onClick={() => setSelectedRack('')} title="Reset selection"><Settings2 size={16} /></button></div><div className="scene-wrap"><WarehouseScene racks={racks} selectedRack={selectedRack} setSelectedRack={setSelectedRack} running={simulationRunning} speed={simulationSpeed} /><div className="scene-legend"><span><i className="legend-dot mint" /> Zone A</span><span><i className="legend-dot amber" /> Zone B</span><span><i className="legend-dot violet" /> Zone C</span><span className="legend-help"><Command size={12} /> Drag to rotate</span></div><div className="scene-corner">LIVE FACILITY VIEW <span>·</span> {simulationRunning ? "RUNNING" : "PAUSED"} <span>·</span> {simulationSpeed.toFixed(1)}×</div><div className="scene-control-strip"><span><i className="live-dot" /> {simulationRunning ? "Vehicles active" : "Vehicles paused"}</span><label>Simulation speed <select value={simulationSpeed} onChange={(e) => setSimulationSpeed(Number(e.target.value))}><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={1.5}>1.5×</option><option value={2}>2×</option></select></label></div></div><div className="zone-summary">{[['A','Inbound & storage','74%','#56cdb5'],['B','Bulk inventory','86%','#e6b85c'],['C','Outbound staging','51%','#7b8cf2']].map(([zone, name, value, color]) => <div className="zone-item" key={zone}><div className="zone-head"><span className="zone-letter" style={{ color, borderColor: color }}>{zone}</span><span className="zone-name">{name}</span><strong>{value}</strong></div><div className="progress-track"><span style={{ width: value, background: color }} /></div></div>)}</div></section>
+          <section className="warehouse-card"><div className="warehouse-card-head"><div><div className="card-title">Distribution centre <span className="tiny-badge">DC-01</span></div><div className="card-subtitle"><MapPin size={13} /> Lagos, Nigeria <span className="separator">·</span> 3 storage zones</div></div><button className="square-button" onClick={() => setSelectedRack('')} title="Reset selection"><Settings2 size={16} /></button></div><div className="scene-wrap"><WarehouseScene racks={racks} selectedRack={selectedRack} setSelectedRack={setSelectedRack} running={simulationRunning} speed={simulationSpeed} liveGps={liveGps} /><div className="scene-legend"><span><i className="legend-dot mint" /> Zone A</span><span><i className="legend-dot amber" /> Zone B</span><span><i className="legend-dot violet" /> Zone C</span><span className="legend-help"><Command size={12} /> Drag to rotate</span></div><div className="scene-corner">LIVE FACILITY VIEW <span>·</span> {simulationRunning ? "RUNNING" : "PAUSED"} <span>·</span> {simulationSpeed.toFixed(1)}×</div><div className="scene-control-strip"><span><i className="live-dot" /> {simulationRunning ? "Vehicles active" : "Vehicles paused"}</span><label>Simulation speed <select value={simulationSpeed} onChange={(e) => setSimulationSpeed(Number(e.target.value))}><option value={0.5}>0.5×</option><option value={1}>1×</option><option value={1.5}>1.5×</option><option value={2}>2×</option></select></label></div></div><div className="zone-summary">{[['A','Inbound & storage','74%','#56cdb5'],['B','Bulk inventory','86%','#e6b85c'],['C','Outbound staging','51%','#7b8cf2']].map(([zone, name, value, color]) => <div className="zone-item" key={zone}><div className="zone-head"><span className="zone-letter" style={{ color, borderColor: color }}>{zone}</span><span className="zone-name">{name}</span><strong>{value}</strong></div><div className="progress-track"><span style={{ width: value, background: color }} /></div></div>)}</div></section>
           <aside className="detail-card"><div className="detail-header"><div><span className="overline">SELECTED LOCATION</span><h3>{selected ? 'Rack ' + selected.id : 'Warehouse details'}</h3></div><button className="square-button"><Ellipsis size={17} /></button></div>{selected ? <><div className="rack-visual"><div className="rack-visual-icon"><Package size={26} /></div><div><strong>Storage rack {selected.id}</strong><span>Zone {selected.zone} · Aisle {selected.id.slice(-1)}</span></div><span className={'status-tag ' + (selected.status === 'Healthy' ? 'status-healthy' : selected.status === 'Attention' ? 'status-attention' : 'status-low')}>{selected.status}</span></div><div className="capacity-block"><div><span>Rack utilisation</span><strong>{selected.occupied}%</strong></div><div className="capacity-track"><span style={{ width: selected.occupied + '%', background: selected.status === 'Attention' ? '#ed8a59' : '#55d6be' }} /></div><div className="capacity-meta"><span>{Math.round(selected.occupied * 0.42)} pallet positions used</span><span>{100 - selected.occupied}% free</span></div></div><div className="detail-metrics"><div><span>SKUs stored</span><strong>{Math.round(selected.occupied * 1.7)}</strong></div><div><span>Available slots</span><strong>{100 - selected.occupied}</strong></div></div><div className="detail-divider" /><div className="mini-heading">RECENT MOVEMENTS <button onClick={() => setActiveNav('Inventory')}>View all <ChevronRight size={13} /></button></div><div className="movement"><span className="movement-icon inbound"><ArrowDownRight size={15} /></span><div><strong>Stock replenished</strong><span>SKU-{selected.id.replace('-', '')}-04</span></div><time>09:24</time></div><div className="movement"><span className="movement-icon outbound"><ArrowUpRight size={15} /></span><div><strong>Order picked</strong><span>ORD-4021 · 4 units</span></div><time>09:12</time></div><button className="button-outline full-button" onClick={receiveShipment}><Plus size={15} /> Receive stock at this rack</button></> : <div className="empty-detail"><Warehouse size={28} /><strong>Select a storage rack</strong><span>Click any rack in the 3D floor view to inspect its stock and movements.</span></div>}</aside>
         </div>
         <div className="lower-grid"><section className="panel"><div className="panel-heading"><div><h2>Shipment schedule</h2><p>Inbound and outbound activity for today.</p></div><button className="text-button" onClick={() => setActiveNav('Shipments')}>View all <ChevronRight size={14} /></button></div><div className="table-controls"><div className="search-box"><Search size={15} /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search shipments..." /></div><select value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter shipments"><option>All</option><option>Loading</option><option>In transit</option><option>Queued</option></select></div><div className="shipment-list"><div className="shipment-table-head"><span>SHIPMENT</span><span>ITEMS</span><span>ETA</span><span>STATUS</span></div>{visibleShipments.map((s) => <div className="shipment-row" key={s.id}><div className="shipment-id"><span className="shipment-dot" style={{ background: s.color }} /><div><strong>{s.id}</strong><small>{s.company}</small></div></div><span>{s.items} items</span><span className="eta"><Clock3 size={13} />{s.eta}</span><span className={'shipment-status ' + s.status.toLowerCase().replace(' ', '-')}>{s.status}</span></div>)}{visibleShipments.length === 0 && <div className="no-results">No shipments match your search.</div>}</div></section><section className="panel activity-panel"><div className="panel-heading"><div><h2>Recent activity</h2><p>Live updates from your warehouse.</p></div><button className="square-button" onClick={() => setEvents(activity)} title="Reset activity"><Activity size={16} /></button></div><div className="activity-list">{events.map((event, i) => { const Icon = event.icon; return <div className="activity-row" key={event.title + i}><span className={'activity-icon ' + event.tone}><Icon size={15} /></span><div className="activity-copy"><strong>{event.title}</strong><span>{event.detail}</span></div><time>{event.time}</time></div> })}</div><div className="activity-footer"><span className="live-dot" /> {simulationRunning ? 'Live simulation events · updating automatically' : 'Simulation paused · events on hold'}</div></section></div>
