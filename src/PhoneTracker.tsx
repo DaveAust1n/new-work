@@ -19,6 +19,7 @@ export default function PhoneTracker() {
   const [permissionHint, setPermissionHint] = useState('Ready to request your phone GPS')
   const [updatedAt, setUpdatedAt] = useState('')
   const watchId = useRef<number | null>(null)
+  const refreshId = useRef<ReturnType<typeof setInterval> | null>(null)
   const deviceId = useRef<string | null>(null)
   const [syncError, setSyncError] = useState('')
 
@@ -56,6 +57,10 @@ export default function PhoneTracker() {
       navigator.geolocation.clearWatch(watchId.current)
       watchId.current = null
     }
+    if (refreshId.current !== null) {
+      clearInterval(refreshId.current)
+      refreshId.current = null
+    }
     setTracking(false)
     setPermissionHint(position ? 'Tracking paused on this phone' : 'Tracking stopped')
   }
@@ -70,8 +75,38 @@ export default function PhoneTracker() {
       setError('GPS access requires a secure HTTPS page.')
       return
     }
+    // Prevent duplicate watchers if Start is pressed again after a GPS error.
+    if (watchId.current !== null) navigator.geolocation.clearWatch(watchId.current)
+    if (refreshId.current !== null) clearInterval(refreshId.current)
     setPermissionHint('Waiting for location permission…')
+    const handlePosition = (result: GeolocationPosition) => {
+      const next: PositionSnapshot = {
+        latitude: result.coords.latitude,
+        longitude: result.coords.longitude,
+        accuracy: result.coords.accuracy,
+        speed: result.coords.speed,
+        heading: result.coords.heading,
+        timestamp: result.timestamp,
+      }
+      setPosition(next)
+      void publishPosition(next)
+      setUpdatedAt(new Date(result.timestamp).toLocaleTimeString())
+      setPermissionHint('Phone GPS is active')
+      setTracking(true)
+      setError('')
+    }
+    const handleError = (geoError: GeolocationPositionError) => {
+      const message = geoError.code === 1
+        ? 'Location permission was denied. Allow location access in your browser settings, then try again.'
+        : geoError.code === 2
+          ? 'Your phone could not get a location fix. Check Location Services and try outdoors.'
+          : 'Location request timed out. Keep this page open and try again with a clearer GPS signal.'
+      setError(message)
+      setPermissionHint('GPS update failed — retrying while tracking is open')
+      // Keep the watcher alive: the browser may recover when GPS signal improves.
+    }
     watchId.current = navigator.geolocation.watchPosition(
+      handlePosition,
       (result) => {
         const next: PositionSnapshot = {
           latitude: result.coords.latitude,
@@ -87,23 +122,25 @@ export default function PhoneTracker() {
         setPermissionHint('Phone GPS is active')
         setTracking(true)
       },
-      (geoError) => {
-        const message = geoError.code === 1
-          ? 'Location permission was denied. Allow location access in your browser settings, then try again.'
-          : geoError.code === 2
-            ? 'Your phone could not get a location fix. Check Location Services and try outdoors.'
-            : 'Location request timed out. Try again with a clearer GPS signal.'
-        setError(message)
-        setTracking(false)
-        setPermissionHint('GPS is not connected')
-      },
-      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 },
+      handleError,
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 25000 },
     )
+    // Some mobile browsers stop delivering watchPosition callbacks. Ask for a fresh
+    // one-shot fix periodically as a fallback, with caching disabled.
+    refreshId.current = setInterval(() => {
+      if (document.visibilityState !== 'visible') return
+      navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000,
+      })
+    }, 7000)
     setTracking(true)
   }
 
   useEffect(() => () => {
     if (watchId.current !== null && 'geolocation' in navigator) navigator.geolocation.clearWatch(watchId.current)
+    if (refreshId.current !== null) clearInterval(refreshId.current)
   }, [])
 
   const speedKmh = position?.speed == null ? null : position.speed * 3.6
